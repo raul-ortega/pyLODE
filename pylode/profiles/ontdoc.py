@@ -10,6 +10,8 @@ from os.path import join
 from rdflib import URIRef, BNode, Literal
 from rdflib.namespace import DC, DCTERMS, DOAP, OWL, PROF, PROV, RDF, RDFS, SDO, SKOS
 from pylode.profiles.base import BaseProfile
+from natsort import natsorted
+
 import re
 
 
@@ -61,7 +63,8 @@ class OntDoc(BaseProfile):
                     t = None
                     if str(o2) in self.PROPERTIES.keys():
                         t = self.PROPERTIES[str(o2)]["prop_type"]
-                    prop = self._make_formatted_uri(str(o2), t)
+                    #prop = self._make_formatted_uri(str(o2), t)
+                    prop = self._build_link(uri=str(o2), source="_make_restrictions_html")
                 elif p2 == OWL.onClass:
                     """
                     domains = []
@@ -117,7 +120,8 @@ class OntDoc(BaseProfile):
                             collection_type, collection_members
                         )
                     else:
-                        cls = self._make_formatted_uri(str(o2), type="c")
+                        #cls = self._make_formatted_uri(str(o2), type="c")
+                        cls = self._build_link(uri=str(o2), type="c", source="_make_restrictions_html")
                 elif p2 in [
                     OWL.cardinality,
                     OWL.qualifiedCardinality,
@@ -791,7 +795,9 @@ class OntDoc(BaseProfile):
             # ranges
             for o in self.G.objects(subject=s, predicate=RDFS.range):
                 if type(o) != BNode:
-                    self.PROPERTIES[prop]["ranges"].append(self._make_formatted_uri(o, type="c"))  # ranges that are just classes
+                    #self.PROPERTIES[prop]["ranges"].append(self._make_formatted_uri(o, type="c"))
+                    #self.PROPERTIES[prop]["ranges"].append(self._build_link(uri=o, type="c", source="ranges"))  # ranges that are just classes
+                    self.PROPERTIES[prop]["ranges"].append(o)
                 else:
                     # range collections (unionOf | intersectionOf)
                     q = """
@@ -970,11 +976,40 @@ class OntDoc(BaseProfile):
             has_members=class_["has_members"]
         )
 
+    def _make_class2(self, class2):
+        # handling Markdown formatting within a table
+        if self.outputformat == "md":
+            desc = class2[1].get("description").replace("\n", " ") \
+                if class2[1].get("description") is not None else None
+        elif self.outputformat == "adoc":
+            desc = class2[1].get("description")
+        else:
+            desc = class2[1].get("description")
+
+        return self._load_template("class." + self.outputformat).render(
+            uri=class2[0],
+            fid=class2[1].get("fid"),
+            title=class2[1].get("title"),
+            description=desc,
+        )
+
+
     def _make_classes(self):
         # make all the individual Classes
         classes_list = []
         for k, v in self.CLASSES.items():
             classes_list.append(self._make_class(k, v))
+
+        cl_instances = []
+
+        for k, v in self.CLASSES.items():
+            cl_instances.append(
+                (
+                    v["title"],
+                    v["fid"],
+                    self._make_class2((k, v)),
+                )
+            )
 
         # make the template for all Classes
         classes_template = self._load_template("classes." + self.outputformat)
@@ -984,7 +1019,7 @@ class OntDoc(BaseProfile):
         #     key=lambda tup: tup[1],
         # )
         class_index = [f"<li>{self._make_formatted_uri(x)}</li>" for x in self.CLASSES.keys()]
-        return classes_template.render(class_index=class_index, classes=classes_list, )
+        return classes_template.render(class_index=class_index, classes=classes_list, cl_instances=cl_instances, )
 
     def _make_property(self, property):
         # handling Markdown formatting within a table
@@ -1255,6 +1290,30 @@ class OntDoc(BaseProfile):
             pylode_version=__version__
         )
 
+    def _build_link(self, uri, type=None, source=None):
+        if uri == None:
+            return self._make_formatted_uri(uri, type=type)
+
+        found = 0
+        link = ""
+        for k, v in self.PROPERTIES.items():
+            if k == uri:
+                title = v.get("title")
+                link = "<a href=#" + title.replace(" ", "") + ">" + v.get("title") + "</a>"
+                found = 1
+                break
+        if found == 0:
+            for k, v in self.CLASSES.items():
+                if k == uri:
+                    title = v.get("title")
+                    link = "<a href=#" + title.replace(" ", "") + ">" + v.get("title") + "</a>"
+                    found = 1
+                    break
+        if found == 0:
+            link = self._make_formatted_uri(uri, type=type)
+
+        return link
+
     def generate_document(self):
         # expand the graph using pre-defined rules to make querying easier (poor man's inference)
         self._expand_graph()
@@ -1288,8 +1347,9 @@ class OntDoc(BaseProfile):
                     if self.PROPERTIES.get(p)
                     else None
                 )
-                html.append(self._make_formatted_uri(p, type=prop_type))
-            self.PROPERTIES[uri]["supers"] = html
+                #html.append(self._make_formatted_uri(p, type=prop_type))
+                html.append(self._build_link(uri=p, type=prop_type))
+            self.PROPERTIES[uri]["supers"] = natsorted(html)
 
             html = []
             for p in prop["subs"]:
@@ -1298,8 +1358,9 @@ class OntDoc(BaseProfile):
                     if self.PROPERTIES.get(p)
                     else None
                 )
-                html.append(self._make_formatted_uri(p, type=prop_type))
-            self.PROPERTIES[uri]["subs"] = html
+                #html.append(self._make_formatted_uri(p, type=prop_type))
+                html.append(self._build_link(uri=p, type=prop_type))
+            self.PROPERTIES[uri]["subs"] = natsorted(html)
 
             html = []
             for p in prop["equivs"]:
@@ -1308,8 +1369,9 @@ class OntDoc(BaseProfile):
                     if self.PROPERTIES.get(p)
                     else None
                 )
-                html.append(self._make_formatted_uri(p, type=prop_type))
-            self.PROPERTIES[uri]["equivs"] = html
+                #html.append(self._make_formatted_uri(p, type=prop_type))
+                html.append(self._build_link(uri=p, type=prop_type, source="equivs"))
+            self.PROPERTIES[uri]["equivs"] = natsorted(html)
 
             html = []
             for p in prop["invs"]:
@@ -1318,43 +1380,51 @@ class OntDoc(BaseProfile):
                     if self.PROPERTIES.get(p)
                     else None
                 )
-                html.append(self._make_formatted_uri(p, type=prop_type))
-            self.PROPERTIES[uri]["invs"] = html
+                #html.append(self._make_formatted_uri(p, type=prop_type))
+                html.append(self._build_link(uri=p, type=prop_type, source="equivs"))
+            self.PROPERTIES[uri]["invs"] = natsorted(html)
 
             html = []
             for d in prop["domains"]:
                 if type(d) == tuple:
                     html.append(self._make_collection_class_html(d[0], d[1]))
                 else:
-                    html.append(self._make_formatted_uri(d, type="c"))
-            self.PROPERTIES[uri]["domains"] = html
+                    #html.append(self._make_formatted_uri(d, type="c"))
+                    html.append(self._build_link(uri=d, type="c", source="domains"))
+
+            self.PROPERTIES[uri]["domains"] = natsorted(html)
 
             html = []
             for d in prop["domainIncludes"]:
                 if type(d) == tuple:
                     for m in d[1]:
-                        html.append(self._make_formatted_uri(m, type="c"))
+                        #html.append(self._make_formatted_uri(m, type="c"))
+                        html.append(self._build_link(uri=m, type="c", source="domainIncludes"))
                 else:
-                    html.append(self._make_formatted_uri(d, type="c"))
-            self.PROPERTIES[uri]["domainIncludes"] = html
+                    #html.append(self._make_formatted_uri(d, type="c"))
+                    html.append(self._build_link(uri=d, type="c", source="domainIncludes"))
+            self.PROPERTIES[uri]["domainIncludes"] = natsorted(html)
 
             html = []
             for d in prop["ranges"]:
                 if type(d) == tuple:
                     for m in d[1]:
                         html.append(m)
+                        #html.append(self._build_link(uri=m, source="ranges"))
                 else:
-                    html.append(d)
-            self.PROPERTIES[uri]["ranges"] = html
+                    html.append(self._build_link(uri=str(d), source="ranges")) #html.append(d) #http://purl.obolibrary.org/obo/GSSO_009994
+            self.PROPERTIES[uri]["ranges"] = natsorted(html)
 
             html = []
             for d in prop["rangeIncludes"]:
                 if type(d) == tuple:
                     for m in d[1]:
-                        html.append(self._make_formatted_uri(m, type="c"))
+                        #html.append(self._make_formatted_uri(m, type="c"))
+                        html.append(self._build_link(uri=m, type="c", source="rangeIncludes"))
                 else:
-                    html.append(self._make_formatted_uri(d, type="c"))
-            self.PROPERTIES[uri]["rangeIncludes"] = html
+                    #html.append(self._make_formatted_uri(d, type="c"))
+                    html.append(self._build_link(uri=d, type="c", source="rangeIncludes"))
+            self.PROPERTIES[uri]["rangeIncludes"] = natsorted(html)
 
         # crosslinking classes
         for uri, cls in self.CLASSES.items():
@@ -1362,32 +1432,37 @@ class OntDoc(BaseProfile):
             for d in cls["equivalents"]:
                 if type(d) == tuple:
                     for m in d[1]:
-                        html.append(self._make_formatted_uri(m, type="c"))
+                        #html.append(self._make_formatted_uri(m, type="c"))
+                        html.append(self._build_link(uri=m, type="c", source="equivalents"))
                 else:
-                    html.append(self._make_formatted_uri(d, type="c"))
-            self.CLASSES[uri]["equivalents"] = html
+                    #html.append(self._make_formatted_uri(d, type="c"))
+                    html.append(self._build_link(uri=d, type="c", source="echivalents"))
+            self.CLASSES[uri]["equivalents"] = natsorted(html)
 
             html = []
             for d in cls["supers"]:
                 if type(d) == tuple:
                     html.append(self._make_collection_class_html(d[0], d[1]))
                 else:
-                    html.append(self._make_formatted_uri(d, type="c"))
-            self.CLASSES[uri]["supers"] = html
+                    #html.append(self._make_formatted_uri(d, type="c"))
+                    html.append(self._build_link(uri=d, type="c", source="supers"))
+            self.CLASSES[uri]["supers"] = natsorted(html)
 
             html = []
             for d in cls["restrictions"]:
                 html.append(self._make_restriction_html(uri, d))
-            self.CLASSES[uri]["restrictions"] = html
+            self.CLASSES[uri]["restrictions"] = natsorted(html)
 
             html = []
             for d in cls["subs"]:
                 if type(d) == tuple:
                     for m in d[1]:
-                        html.append(self._make_formatted_uri(m, type="c"))
+                        #html.append(self._make_formatted_uri(m, type="c"))
+                        html.append(self._build_link(uri=m, type="c", source="subs"))
                 else:
-                    html.append(self._make_formatted_uri(d, type="c"))
-            self.CLASSES[uri]["subs"] = html
+                    #html.append(self._make_formatted_uri(d, type="c"))
+                    html.append(self._build_link(uri=d, type="c", source="subs"))
+            self.CLASSES[uri]["subs"] = natsorted(html)
 
             html = []
             for p in cls["in_domain_of"]:
@@ -1396,8 +1471,10 @@ class OntDoc(BaseProfile):
                     if self.PROPERTIES.get(p)
                     else None
                 )
-                html.append(self._make_formatted_uri(p, type=prop_type))
-            self.CLASSES[uri]["in_domain_of"] = html
+                #html.append(self._make_formatted_uri(p, type=prop_type))
+                html.append(self._build_link(uri=p, type=prop_type, source="if_domain_of"))
+
+            self.CLASSES[uri]["in_domain_of"] = natsorted(html)
 
             html = []
             for p in cls["in_domain_includes_of"]:
@@ -1406,8 +1483,9 @@ class OntDoc(BaseProfile):
                     if self.PROPERTIES.get(p)
                     else None
                 )
-                html.append(self._make_formatted_uri(p, type=prop_type))
-            self.CLASSES[uri]["in_domain_includes_of"] = html
+                #html.append(self._make_formatted_uri(p, type=prop_type))
+                html.append(self._build_link(uri=p, type=prop_type, source="in_domain_includes_of"))
+            self.CLASSES[uri]["in_domain_includes_of"] = natsorted(html)
 
             html = []
             for p in cls["in_range_of"]:
@@ -1416,8 +1494,9 @@ class OntDoc(BaseProfile):
                     if self.PROPERTIES.get(p)
                     else None
                 )
-                html.append(self._make_formatted_uri(p, type=prop_type))
-            self.CLASSES[uri]["in_range_of"] = html
+                #html.append(self._make_formatted_uri(p, type=prop_type))
+                html.append(self._build_link(uri=p, type=prop_type, source="in_range_of"))
+            self.CLASSES[uri]["in_range_of"] = natsorted(html)
 
             html = []
             for p in cls["in_range_includes_of"]:
@@ -1426,8 +1505,9 @@ class OntDoc(BaseProfile):
                     if self.PROPERTIES.get(p)
                     else None
                 )
-                html.append(self._make_formatted_uri(p, type=prop_type))
-            self.CLASSES[uri]["in_range_includes_of"] = html
+                #html.append(self._make_formatted_uri(p, type=prop_type))
+                html.append(self._build_link(uri=p, type=prop_type, source="in_range_includes_of"))
+            self.CLASSES[uri]["in_range_includes_of"] = natsorted(html)
 
             html = []
             for p in cls["has_members"]:
@@ -1436,7 +1516,8 @@ class OntDoc(BaseProfile):
                     if self.PROPERTIES.get(p)
                     else None
                 )
-                html.append(self._make_formatted_uri(p, type=prop_type))
-            self.CLASSES[uri]["has_members"] = html
+                #html.append(self._make_formatted_uri(p, type=prop_type))
+                html.append(self._build_link(uri=p, type=prop_type, source="has_members"))
+            self.CLASSES[uri]["has_members"] = natsorted(html)
 
         return self._make_document()
