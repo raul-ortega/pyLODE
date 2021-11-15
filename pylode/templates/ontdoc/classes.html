@@ -1,8 +1,8 @@
 <section id="classes">
     <h2>Classes <span style="float:right; font-size:smaller;"><a href="">&uparrow;</a></span></h2>
     <ul class="hlist">
-      {%- for i in class_index %}
-      {{i}}
+      {%- for i in cl_instances %}
+      <li><a href="#{{ i[1] }}">{{ i[0] }}</a></li>
       {%- endfor %}
     </ul>
     {%- for class in classes %}
